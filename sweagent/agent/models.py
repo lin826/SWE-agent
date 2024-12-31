@@ -8,6 +8,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from threading import Lock
 from typing import Annotated, Any, Literal
+# from opto import trace
+# from opto.utils.llm import AutoGenLLM
 
 import litellm
 import litellm.types.utils
@@ -199,6 +201,7 @@ class AbstractModel(ABC):
         self.stats = InstanceStats()
 
     @abstractmethod
+    # @trace.bundle()
     def query(self, history: History, action_prompt: str = "> ") -> dict: ...
 
 
@@ -618,5 +621,7 @@ def get_model(args: ModelConfig, tools: ToolConfig) -> AbstractModel:
     elif args.name == "instant_empty_submit":
         assert isinstance(args, InstantEmptySubmitModelConfig), f"Expected {InstantEmptySubmitModelConfig}, got {args}"
         return InstantEmptySubmitTestModel(args, tools)
+    if args.name == "trace":
+        return TraceModel(args, tools)
     assert isinstance(args, GenericAPIModelConfig), f"Expected {GenericAPIModelConfig}, got {args}"
     return LiteLLMModel(args, tools)

@@ -14,6 +14,8 @@ from simple_parsing.helpers.fields import field
 from swerex.exceptions import BashIncorrectSyntaxError, CommandTimeoutError, SwerexException
 from tenacity import RetryError
 from typing_extensions import Self
+from opto.optimizers import OptoPrime
+from opto import trace
 
 from sweagent import __version__, get_agent_commit_hash, get_rex_commit_hash, get_rex_version
 from sweagent.agent.history_processors import DefaultHistoryProcessor, HistoryProcessor
@@ -134,6 +136,7 @@ RETRY_WITH_OUTPUT_TOKEN = "###SWE-AGENT-RETRY-WITH-OUTPUT###"
 RETRY_WITHOUT_OUTPUT_TOKEN = "###SWE-AGENT-RETRY-WITHOUT-OUTPUT###"
 
 
+@trace.model
 class Agent:
     def __init__(
         self,
@@ -185,6 +188,10 @@ class Agent:
         """This can be set to a RunSingleConfig from the Run instance whenever possible.
         It can be used to replay the agent's trajectory in an environment.
         """
+
+        # self.optimizer = OptoPrime(self.parameters())  # no-member: ignore
+        # self.instruct1 = trace.node("Decide the language", trainable=True)
+        # self.instruct2 = trace.node("Extract name if it's there", trainable=True)
 
     @classmethod
     def from_config(cls, config: AgentConfig) -> Self:
@@ -638,7 +645,28 @@ class Agent:
             step.observation = step.observation.replace(RETRY_WITHOUT_OUTPUT_TOKEN, "")
             raise _RetryWithoutOutput()
 
+        # if not self.optimizer:
         return self.handle_submission(step)
+
+        # try:
+        #     self.optimizer.zero_feedback()
+        #     step_output = self.handle_submission(step)
+        #     self.optimizer.backward(self.model.greeting, step_output.submission)
+        # except trace.ExecutionError as e:
+        #     self.optimizer.backward(e.exception_node, self.model.greeting.data)
+        # self.optimizer.step(verbose=True)
+        # return step_output
+
+    @trace.bundle(trainable=True)
+    def decide_lang(self, response) -> str:
+        """Map the language into a variable"""
+        return 'es' if 'es' in response else 'en'
+
+    @trace.bundle(trainable=True)
+    def greet(self, lang, user_name) -> str:
+        """Produce a greeting based on the language"""
+        greeting = "Hola" if lang == "es" else "Hello"
+        return f"{greeting}, {user_name}!"
 
     def forward(self, history: list[dict[str, str]]) -> StepOutput:
         """Forward the model without handling errors.
@@ -660,8 +688,12 @@ class Agent:
         try:
             # Forward model and get actions
             self._chook.on_model_query(messages=history, agent=self.name)
-            output = self.model.query(history)  # type: ignore
-            step.output = output["message"]
+            output = self.model.query(history)
+            self.output = output['message']
+            # output = self.model.query(history, action_prompt=self.instruct1)["message"]
+            # en_or_es = self.decide_lang(output)
+            # user_name = self.model.query(history, action_prompt=self.instruct2)["message"]
+            # step.output = self.greet(en_or_es, user_name)
             if isinstance(self.model, HumanThoughtModel):
                 # TODO: This might be a bit hacky
                 # consider changing sweagent/tools/tools.py:ToolConfig to enforce this.
@@ -762,7 +794,6 @@ class Agent:
                 # Requery with the same template as the last step
 
             # Errors that cause exit
-
             except ContextWindowExceededError:
                 return handle_error_with_autosubmission(
                     "exit_context",
